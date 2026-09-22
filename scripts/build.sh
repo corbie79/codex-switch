@@ -5,7 +5,7 @@ version="${1:-0.1.0}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Version must be X.Y.Z' >&2; exit 1; }
 app="dist/Codex Account Switcher.app"
 mkdir -p build "$app/Contents/MacOS"
-xcrun swiftc Sources/main.swift -O -target arm64-apple-macosx13.0 -o "$app/Contents/MacOS/CodexAccountSwitcher" -framework Cocoa -framework Security
+xcrun swiftc Sources/*.swift -O -target arm64-apple-macosx13.0 -o "$app/Contents/MacOS/CodexAccountSwitcher" -framework Cocoa -framework Security
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

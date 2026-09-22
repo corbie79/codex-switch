@@ -9,3 +9,6 @@ profiles.json
 login-*/
 .env
 .env.*
+
+*.key
+*.pem

@@ -104,6 +104,13 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var loginDirectory: URL?
     var loginTimer: Timer?
     var registration: Registration?
+    var updateTimer: Timer?
+    var checkingUpdate = false
+    var updateStatus = ""
+    var automaticUpdates: Bool {
+        get { UserDefaults.standard.bool(forKey: "automaticUpdates") }
+        set { UserDefaults.standard.set(newValue, forKey: "automaticUpdates") }
+    }
     var restartVS: Bool { get { UserDefaults.standard.bool(forKey: "restartVS") } set { UserDefaults.standard.set(newValue, forKey: "restartVS") } }
     var auth: URL { home.appendingPathComponent("auth.json") }
     var appURL: URL { NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") ?? URL(fileURLWithPath: "/Applications/ChatGPT.app") }
@@ -120,7 +127,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let data = try? Data(contentsOf: directory.appendingPathComponent("profiles.json")) { profiles = try JSONDecoder().decode([Profile].self, from:data) }
             if fm.fileExists(atPath: auth.path) { try capture() }
         } catch { show(error) }
+        UserDefaults.standard.register(defaults: ["automaticUpdates": true])
         rebuild()
+        if let error = try? String(contentsOf: UpdateInstaller.errorFile, encoding: .utf8) {
+            try? fm.removeItem(at: UpdateInstaller.errorFile)
+            alert("업데이트를 완료하지 못했습니다", error)
+        }
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 900, repeats: true) { [weak self] _ in self?.scheduledUpdate() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { self.scheduledUpdate() }
     }
     func save() throws { try JSONEncoder().encode(profiles).write(to:directory.appendingPathComponent("profiles.json"), options:.atomic) }
     @discardableResult func capture() throws -> Identity {
@@ -144,7 +158,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu(); menu.delegate = self
         menu.autoenablesItems = false
         let current = (try? Data(contentsOf:auth)).flatMap { try? Identity.parse($0) }
-        add(menu, busy ? "계정 처리 중…" : "Codex 계정 전환", nil).isEnabled = false
+        add(menu, busy ? "작업 처리 중…" : "Codex 계정 전환", nil).isEnabled = false
         for kind in AccountKind.allCases {
             let group = profiles.filter { ($0.kind ?? .unknown) == kind }
             if !group.isEmpty {
@@ -163,6 +177,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let vs = add(settings,"VS Code도 함께 재실행",#selector(toggleVS)); vs.state = restartVS ? .on : .off; vs.isEnabled = !busy
         add(settings,"등록 계정 삭제…",#selector(removeAccount)).isEnabled = !busy
         let settingsItem = add(menu,"설정",nil); settingsItem.submenu = settings
+        menu.addItem(.separator())
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        add(menu, "버전 \(version)", nil).isEnabled = false
+        add(menu, checkingUpdate ? "업데이트 확인 중…" : "업데이트 확인…", #selector(checkUpdates)).isEnabled = !busy && !checkingUpdate
+        let auto = add(menu, "자동 업데이트", #selector(toggleAutomaticUpdates)); auto.state = automaticUpdates ? .on : .off
+        auto.isEnabled = !busy
+        if !updateStatus.isEmpty { add(menu, updateStatus, nil).isEnabled = false }
+        add(menu, "GitHub 릴리스 보기", #selector(openReleases))
         add(menu,"사용 안내",#selector(help))
         add(menu,"종료",#selector(quit)).isEnabled = !busy
         item.menu = menu
@@ -171,6 +193,55 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let current = (try? Data(contentsOf:auth)).flatMap { try? Identity.parse($0) }
         for entry in menu.items where entry.representedObject is String {
             entry.state = (entry.representedObject as? String) == current?.id ? .on : .off
+        }
+    }
+    @objc func openReleases() { NSWorkspace.shared.open(Updater.releasesURL) }
+    @objc func toggleAutomaticUpdates() { automaticUpdates.toggle(); rebuild() }
+    @objc func checkUpdates() { checkForUpdate(manual: true) }
+    func scheduledUpdate() {
+        guard automaticUpdates, !busy, !checkingUpdate, NSApp.modalWindow == nil else { return }
+        let last = UserDefaults.standard.object(forKey: "lastUpdateCheck") as? Date ?? .distantPast
+        if Date().timeIntervalSince(last) >= 6 * 60 * 60 { checkForUpdate(manual: false) }
+    }
+    func checkForUpdate(manual: Bool) {
+        guard !busy, !checkingUpdate else { return }
+        checkingUpdate = true; updateStatus = ""; rebuild()
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.0"
+        Task { @MainActor in
+            var ownsBusy = false
+            do {
+                let manifest = try await Updater.latest(current: version)
+                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheck")
+                checkingUpdate = false
+                guard let manifest = manifest else {
+                    updateStatus = "최신 버전입니다"; rebuild()
+                    if manual { alert("최신 버전입니다", "현재 버전: \(version)") }
+                    return
+                }
+                guard !busy, NSApp.modalWindow == nil, manual || automaticUpdates else {
+                    UserDefaults.standard.removeObject(forKey: "lastUpdateCheck")
+                    updateStatus = "새 버전 \(manifest.version) 사용 가능"; rebuild(); return
+                }
+                if manual {
+                    let a = NSAlert(); a.messageText = "새 버전 \(manifest.version)"
+                    a.informativeText = "현재 버전: \(version)\n업데이트 후 계정 전환 앱만 다시 시작합니다. Codex와 등록 계정은 유지됩니다."
+                    a.addButton(withTitle: "설치하고 재시작"); a.addButton(withTitle: "나중에")
+                    NSApp.activate(ignoringOtherApps: true)
+                    guard a.runModal() == .alertFirstButtonReturn else { rebuild(); return }
+                }
+                ownsBusy = true; busy = true; updateStatus = "업데이트 다운로드 및 검증 중…"; rebuild()
+                let target = Bundle.main.bundleURL.resolvingSymlinksInPath()
+                let work = try await Updater.stage(manifest, target: target)
+                do { try Updater.launchHelper(work: work, target: target) }
+                catch { try? fm.removeItem(at: work); throw error }
+                NSApp.terminate(nil)
+            } catch {
+                checkingUpdate = false; if ownsBusy { busy = false }
+                updateStatus = "업데이트 실패 — 다시 확인해 주세요"; rebuild()
+                if manual { show(error) }
+                // Back off on offline/rate-limit/signature failures instead of retrying constantly.
+                UserDefaults.standard.set(Date(), forKey: "lastUpdateCheck")
+            }
         }
     }
     func show(_ error: Error) { alert("작업을 완료하지 못했습니다",error.localizedDescription) }
@@ -293,7 +364,25 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard rename(staged.path,auth.path) == 0 else { throw Failure(message:"로그인 파일을 교체할 수 없습니다.") }
     }
 }
-if CommandLine.arguments.contains("--self-test") {
+if CommandLine.arguments.count == 5 && CommandLine.arguments[1] == "--apply-update" {
+    if let pid = Int32(CommandLine.arguments[4]) {
+        UpdateInstaller.runHelper(work: URL(fileURLWithPath: CommandLine.arguments[2]), target: URL(fileURLWithPath: CommandLine.arguments[3]), parentPID: pid)
+    }
+} else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--check-update" {
+    Task {
+        do {
+            if let update = try await Updater.latest(current: CommandLine.arguments[2]) {
+                print("Verified update: \(update.version)")
+            } else { print("Up to date") }
+            exit(0)
+        } catch { fputs("Update check failed: \(error)\n", stderr); exit(1) }
+    }
+    dispatchMain()
+} else if CommandLine.arguments.count == 4 && CommandLine.arguments[1] == "--test-update-archive" {
+    do { try testUpdateArchive(CommandLine.arguments[2], version: CommandLine.arguments[3]) }
+    catch { fputs("Update archive test failed: \(error)\n", stderr); exit(1) }
+} else if CommandLine.arguments.contains("--self-test") {
+    do { try runUpdateTests() } catch { fatalError("Update tests failed: \(error)") }
     func fixture(_ sub: String, _ account: String, _ plan: String, claimAccount: String? = nil) -> Data {
         let payload = try! JSONSerialization.data(withJSONObject: ["sub": sub, "email": "test@example.invalid",
             "https://api.openai.com/auth": ["chatgpt_plan_type": plan, "chatgpt_account_id": claimAccount ?? account]])

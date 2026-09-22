@@ -19,15 +19,30 @@ jobs:
           RELEASE_REF: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
-          version=0.1.0
+          version=0.2.0
           if [[ "$REF_TYPE" == tag ]]; then version="${RELEASE_REF#v}"; fi
           ./scripts/build.sh "$version"
+      - name: Test release archive installation
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          version=0.2.0
+          if [[ "$REF_TYPE" == tag ]]; then version="${RELEASE_REF#v}"; fi
+          build/CodexAccountSwitcher-tests --test-update-archive "dist/Codex-Account-Switcher-$version-macOS-arm64.zip" "$version"
+      - name: Sign update manifest
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+          RELEASE_REF: ${{ github.ref_name }}
+        run: swift scripts/sign-update.swift "${RELEASE_REF#v}" "dist/Codex-Account-Switcher-${RELEASE_REF#v}-macOS-arm64.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: Codex-Account-Switcher-macOS
           path: |
             dist/*.zip
             dist/SHA256SUMS.txt
+            dist/update.json
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -45,4 +60,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS.txt --verify-tag --title "Codex Account Switcher $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+        run: |
+          gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS.txt dist/update.json --draft --verify-tag --title "Codex Account Switcher $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest
