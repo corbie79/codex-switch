@@ -19,7 +19,7 @@ jobs:
           RELEASE_REF: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
-          version=0.2.0
+          version=0.3.0
           if [[ "$REF_TYPE" == tag ]]; then version="${RELEASE_REF#v}"; fi
           ./scripts/build.sh "$version"
       - name: Test release archive installation
@@ -27,7 +27,7 @@ jobs:
           RELEASE_REF: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
         run: |
-          version=0.2.0
+          version=0.3.0
           if [[ "$REF_TYPE" == tag ]]; then version="${RELEASE_REF#v}"; fi
           build/CodexAccountSwitcher-tests --test-update-archive "dist/Codex-Account-Switcher-$version-macOS-arm64.zip" "$version"
       - name: Sign update manifest

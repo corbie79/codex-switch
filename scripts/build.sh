@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${1:-0.1.0}"
+version="${1:-0.3.0}"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Version must be X.Y.Z' >&2; exit 1; }
 app="dist/Codex Account Switcher.app"
 mkdir -p build "$app/Contents/MacOS"

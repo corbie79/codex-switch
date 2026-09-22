@@ -173,6 +173,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add(menu,"＋ 퍼스널 / 비즈니스 등록…",#selector(addAccount)).isEnabled = !busy
         add(menu,"현재 로그인 계정 저장",#selector(saveCurrent)).isEnabled = !busy
         if login != nil { add(menu,"로그인 취소",#selector(cancelLogin)) }
+        let isolated = NSMenu(); isolated.autoenablesItems = false
+        for slot in IsolatedSlot.allCases {
+            add(isolated, "\(slot.title) 전용 Codex 열기", #selector(openIsolated(_:)), slot.rawValue).isEnabled = !busy
+        }
+        add(isolated, "독립 실행 안내", #selector(isolatedHelp))
+        let isolatedItem = add(menu, "계정별 독립 실행 (실험)", nil); isolatedItem.submenu = isolated
         let settings = NSMenu(); settings.autoenablesItems = false
         let vs = add(settings,"VS Code도 함께 재실행",#selector(toggleVS)); vs.state = restartVS ? .on : .off; vs.isEnabled = !busy
         add(settings,"등록 계정 삭제…",#selector(removeAccount)).isEnabled = !busy
@@ -194,6 +200,31 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for entry in menu.items where entry.representedObject is String {
             entry.state = (entry.representedObject as? String) == current?.id ? .on : .off
         }
+    }
+    @objc func isolatedHelp() {
+        alert("계정별 독립 실행 (실험)", "퍼스널과 비즈니스를 별도 Codex 앱으로 엽니다.\n\n처음에는 각 창에서 직접 로그인하고 올바른 워크스페이스를 선택하세요. 기존 등록 계정이나 대화 기록을 복사하지 않으므로 처음 목록은 비어 있을 수 있습니다. 원래 창의 기록은 그대로 유지됩니다.\n\n이미 열린 독립 앱은 앞으로 가져옵니다. 독립 앱이 실행 중이면 다른 창을 보호하기 위해 기존 전체 계정 전환을 차단합니다. 창을 유지한 채 다른 계정으로 바꾸는 기능은 아닙니다.")
+    }
+    @objc func openIsolated(_ sender: NSMenuItem) {
+        guard !busy, let value = sender.representedObject as? String, let slot = IsolatedSlot(rawValue: value) else { return }
+        do {
+            let plan = try IsolatedLaunchPlan(slot: slot, storageRoot: directory.appendingPathComponent("isolated-profiles"), app: appURL)
+            if let existing = try IsolatedRuntime.existingInstance(for: plan) {
+                existing.activate(options: [.activateAllWindows]); return
+            }
+            if !fm.fileExists(atPath: plan.profileRoot.path) {
+                let a = NSAlert(); a.messageText = "\(slot.title) 전용 Codex 열기"
+                a.informativeText = "별도 로그인과 작업 기록을 사용하는 실험 기능입니다. 새 창에서 \(slot.title) 계정으로 직접 로그인하세요. 기존 창과 기록은 유지됩니다."
+                a.addButton(withTitle: "독립 창 열기"); a.addButton(withTitle: "취소")
+                NSApp.activate(ignoringOtherApps: true)
+                guard a.runModal() == .alertFirstButtonReturn else { return }
+            }
+            busy = true; rebuild()
+            try IsolatedRuntime.launch(plan) { [weak self] error in
+                guard let self = self else { return }
+                self.busy = false; self.rebuild()
+                if let error = error { self.show(error) }
+            }
+        } catch { busy = false; rebuild(); show(error) }
     }
     @objc func openReleases() { NSWorkspace.shared.open(Updater.releasesURL) }
     @objc func toggleAutomaticUpdates() { automaticUpdates.toggle(); rebuild() }
@@ -323,11 +354,12 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc func switchAccount(_ sender:NSMenuItem) {
         guard !busy, let id=sender.representedObject as? String else { return }
         do {
+            _ = try IsolatedRuntime.globalSwitchTargets()
             let data=try vault.get(id); guard try Identity.parse(data).id == id else { throw Failure(message:"저장된 계정 정보가 일치하지 않습니다.") }
             // Save refreshed credentials before and again after the app has fully exited.
             if fm.fileExists(atPath:auth.path) { try capture() }
             busy=true; rebuild()
-            var targets=NSRunningApplication.runningApplications(withBundleIdentifier:"com.openai.codex")
+            var targets = try IsolatedRuntime.globalSwitchTargets()
             if restartVS { targets += NSRunningApplication.runningApplications(withBundleIdentifier:"com.microsoft.VSCode") }
             for app in targets { _ = app.terminate() }
             waitForExit(targets, id:id, data:data, deadline:Date().addingTimeInterval(25))
@@ -339,6 +371,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.asyncAfter(deadline:.now()+0.3) { self.waitForExit(targets,id:id,data:data,deadline:deadline) }; return
         }
         do {
+            guard NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.codex").allSatisfy({ $0.isTerminated }) else {
+                throw Failure(message: "다른 Codex 앱이 시작되어 로그인 파일 교체를 중단했습니다.")
+            }
             let oldData=try? Data(contentsOf:auth)
             let current: Identity? = oldData == nil ? nil : try capture()
             let chosen = current?.id == id ? try vault.get(id) : data
@@ -368,6 +403,17 @@ if CommandLine.arguments.count == 5 && CommandLine.arguments[1] == "--apply-upda
     if let pid = Int32(CommandLine.arguments[4]) {
         UpdateInstaller.runHelper(work: URL(fileURLWithPath: CommandLine.arguments[2]), target: URL(fileURLWithPath: CommandLine.arguments[3]), parentPID: pid)
     }
+} else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--plan-isolated-profile" {
+    do {
+        guard let slot = IsolatedSlot(rawValue: CommandLine.arguments[2]) else {
+            throw Failure(message: "프로필은 personal 또는 business여야 합니다.")
+        }
+        let storage = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Codex Account Switcher/isolated-profiles")
+        let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") ?? URL(fileURLWithPath: "/Applications/ChatGPT.app")
+        let plan = try IsolatedLaunchPlan(slot: slot, storageRoot: storage, app: app)
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        print(String(decoding: try encoder.encode(plan), as: UTF8.self))
+    } catch { fputs("Cannot prepare isolated launch plan: \(error)\n", stderr); exit(1) }
 } else if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "--check-update" {
     Task {
         do {
@@ -382,7 +428,7 @@ if CommandLine.arguments.count == 5 && CommandLine.arguments[1] == "--apply-upda
     do { try testUpdateArchive(CommandLine.arguments[2], version: CommandLine.arguments[3]) }
     catch { fputs("Update archive test failed: \(error)\n", stderr); exit(1) }
 } else if CommandLine.arguments.contains("--self-test") {
-    do { try runUpdateTests() } catch { fatalError("Update tests failed: \(error)") }
+    do { try runIsolatedProfileTests(); try runUpdateTests() } catch { fatalError("Self-tests failed: \(error)") }
     func fixture(_ sub: String, _ account: String, _ plan: String, claimAccount: String? = nil) -> Data {
         let payload = try! JSONSerialization.data(withJSONObject: ["sub": sub, "email": "test@example.invalid",
             "https://api.openai.com/auth": ["chatgpt_plan_type": plan, "chatgpt_account_id": claimAccount ?? account]])

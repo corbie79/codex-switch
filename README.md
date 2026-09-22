@@ -26,6 +26,21 @@ macOS 13 이상, Apple Silicon(M1 이상), Codex 데스크톱 앱이 필요합�
 
 처음 실행할 때 현재 파일 기반 로그인도 자동으로 저장합니다. 기존 버전의 등록 목록은 계속 읽을 수 있으며, 현재 계정은 재감지합니다. 다른 기존 계정은 해당 계정으로 전환한 후 ‘현재 로그인 계정 저장’을 누르면 유형이 갱신됩니다.
 
+## 퍼스널·비즈니스를 동시에 사용하기 (실험)
+
+**CX → 계정별 독립 실행 (실험)**에서 **퍼스널 전용 Codex 열기** 또는 **비즈니스 전용 Codex 열기**를 선택합니다. 처음 열 때 안내를 확인한 후 각 창에서 해당 계정·워크스페이스로 직접 로그인하세요.
+
+- 두 슬롯은 인증·설정·작업 기록과 창 데이터를 서로 다른 폴더에 저장합니다.
+- 기존에 등록한 토큰이나 대화 기록은 복사하지 않습니다. 처음에는 목록이 비어 있을 수 있으며, 원래 창의 기록은 그대로 남습니다.
+- 슬롯 이름은 용도 표시입니다. 자동으로 해당 구독에 로그인하지 않으므로 각 창에서 실제 계정·워크스페이스를 확인하세요.
+- 이미 열린 슬롯을 다시 선택하면 해당 앱을 앞으로 가져옵니다.
+- 독립 앱 또는 여러 Codex 인스턴스가 실행 중이면 기존 전체 계정 전환을 차단합니다. 다른 창의 작업을 보호하기 위한 동작입니다.
+- 한 인스턴스의 계정 변경은 해당 앱에서 로그아웃·로그인하여 진행하세요. 이미 열린 대화를 그대로 유지하면서 계정만 교체하거나, 임의의 기존 창을 독립 실행으로 바꾸는 기능은 아닙니다.
+
+현재 설치된 Codex의 내부 실행 옵션을 사용하는 실험 기능입니다. Codex 버전 변경에 따라 호환성이 달라질 수 있습니다. 두 실제 계정의 로그인·토큰 갱신·딥링크를 포함한 장시간 동시 사용은 아직 검증하지 않았습니다.
+
+상세 내용: [독립 실행 구성과 검증 범위](docs/isolated-profiles-preparation.md).
+
 ## 업데이트
 
 - **CX → 업데이트 확인…**: GitHub의 최신 정식 버전을 확인합니다. 새 버전이 있으면 **설치하고 재시작** 또는 **나중에**를 선택할 수 있습니다. 현재 버전과 최신 여부, 네트워크 오류도 표시합니다.
@@ -63,7 +78,7 @@ Xcode Command Line Tools가 설치된 Mac에서:
 ```sh
 ./scripts/test.sh
 ./scripts/test.sh --keychain-test  # 임시 테스트 키체인 항목 생성·갱신·삭제
-./scripts/build.sh 0.2.0
+./scripts/build.sh 0.3.0
 ```
 
 `dist/`에 Apple Silicon 앱, ZIP, SHA-256 체크섬을 생성합니다. Apple 개발자 인증서나 실사용 로그인 없이 빌드할 수 있습니다.
@@ -75,8 +90,8 @@ Xcode Command Line Tools가 설치된 Mac에서:
 업데이트 검사는 다음 명령으로도 확인할 수 있습니다.
 
 ```sh
-build/CodexAccountSwitcher-tests --check-update 0.2.0
-build/CodexAccountSwitcher-tests --test-update-archive dist/Codex-Account-Switcher-0.2.0-macOS-arm64.zip 0.2.0
+build/CodexAccountSwitcher-tests --check-update 0.3.0
+build/CodexAccountSwitcher-tests --test-update-archive dist/Codex-Account-Switcher-0.3.0-macOS-arm64.zip 0.3.0
 ```
 
 릴리스 서명에는 저장소의 GitHub Actions Secret `UPDATE_SIGNING_KEY`를 사용합니다. 서명 키는 소스·배포 파일에 포함하지 마세요. 기존 설치가 새 버전을 신뢰할 수 있도록 같은 키를 유지해야 합니다. 포크에서 배포하려면 별도 키를 생성하고 `UpdateManifest.publicKey` 및 저장소 URL을 변경해야 합니다. 공개키의 서명 검증은 Apple 공증과 별개이며, 최초 설치에는 위 macOS 실행 허용 안내가 적용됩니다.
