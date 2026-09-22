@@ -1,0 +1,11 @@
+.DS_Store
+build/
+dist/
+*.dSYM/
+*.zip
+*.dmg
+auth.json
+profiles.json
+login-*/
+.env
+.env.*

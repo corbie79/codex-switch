@@ -1,0 +1,48 @@
+name: Build and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test account and workspace handling
+        run: ./scripts/test.sh
+      - name: Build Apple Silicon macOS app
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          version=0.1.0
+          if [[ "$REF_TYPE" == tag ]]; then version="${RELEASE_REF#v}"; fi
+          ./scripts/build.sh "$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Codex-Account-Switcher-macOS
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Codex-Account-Switcher-macOS
+          path: dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS.txt --verify-tag --title "Codex Account Switcher $RELEASE_TAG" --notes-file RELEASE_NOTES.md
