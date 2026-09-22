@@ -8,6 +8,8 @@ enum AccountKind: String, Codable, CaseIterable {
         switch self { case .personal: return "퍼스널"; case .business: return "비즈니스"; case .unknown: return "기타 / 미확인" }
     }
     static func from(plan: String) -> AccountKind {
+        // Codex also emits this Business SKU in current login tokens.
+        if plan.lowercased().hasPrefix("self_serve_business_") { return .business }
         switch plan.lowercased() {
         case "free", "plus", "pro", "go": return .personal
         case "team", "business", "enterprise", "edu": return .business
@@ -305,7 +307,7 @@ if CommandLine.arguments.contains("--self-test") {
     let business = try! Identity.parse(fixture("same-user", "business-workspace", "team"))
     precondition(personal.id != business.id && personal.kind == .personal && business.kind == .business)
     precondition(try! Identity.parse(fixture("other-user", "business-workspace", "business")).id != business.id)
-    for plan in ["business", "team", "enterprise", "edu"] { precondition(AccountKind.from(plan: plan) == .business) }
+    for plan in ["business", "team", "enterprise", "edu", "self_serve_business_prolite"] { precondition(AccountKind.from(plan: plan) == .business) }
     for plan in ["free", "plus", "pro", "go"] { precondition(AccountKind.from(plan: plan) == .personal) }
     rejects { _ = try Identity.parse(Data("{}".utf8)) }
     rejects { _ = try Identity.parse(fixture("a", "w", "plus", claimAccount: "wrong")) }
