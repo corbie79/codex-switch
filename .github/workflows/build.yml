@@ -11,7 +11,7 @@ jobs:
   build:
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Test account and workspace handling
         run: ./scripts/test.sh
       - name: Build Apple Silicon macOS app
@@ -36,7 +36,7 @@ jobs:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
           RELEASE_REF: ${{ github.ref_name }}
         run: swift scripts/sign-update.swift "${RELEASE_REF#v}" "dist/Codex-Account-Switcher-${RELEASE_REF#v}-macOS-arm64.zip"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Codex-Account-Switcher-macOS
           path: |
@@ -50,8 +50,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: Codex-Account-Switcher-macOS
           path: dist
